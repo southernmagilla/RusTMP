@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cargo init:*)",
+      "Bash(cargo build:*)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(cargo search:*)"
+    ]
+  }
+}
