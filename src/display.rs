@@ -27,6 +27,9 @@ mod colors {
 }
 use colors::*;
 
+const WIDTH: usize = 90;
+const COL_WIDTH: usize = 42;
+
 pub fn init_terminal() {
     #[cfg(windows)]
     {
@@ -58,6 +61,44 @@ fn enable_windows_ansi() {
     }
 }
 
+/// Center a string within a given width
+fn center(s: &str, width: usize) -> String {
+    let visible_len = visible_length(s);
+    if visible_len >= width {
+        return s.to_string();
+    }
+    let padding = (width - visible_len) / 2;
+    format!("{:pad$}{}", "", s, pad = padding)
+}
+
+/// Calculate visible length (excluding ANSI codes)
+fn visible_length(s: &str) -> usize {
+    let mut len = 0;
+    let mut in_escape = false;
+    for c in s.chars() {
+        if c == '\x1b' {
+            in_escape = true;
+        } else if in_escape {
+            if c == 'm' {
+                in_escape = false;
+            }
+        } else {
+            len += 1;
+        }
+    }
+    len
+}
+
+/// Pad a string to a given visible width
+fn pad_to(s: &str, width: usize) -> String {
+    let visible_len = visible_length(s);
+    if visible_len >= width {
+        s.to_string()
+    } else {
+        format!("{}{:pad$}", s, "", pad = width - visible_len)
+    }
+}
+
 pub fn render(
     app_name: &str,
     stream_key: &str,
@@ -68,140 +109,186 @@ pub fn render(
     diagnostics: &StreamDiagnostics,
     diagnostic_results: &[Diagnostic],
 ) {
-    let mut out = String::with_capacity(4096);
+    let mut out = String::with_capacity(8192);
 
     // Clear screen and home
     out.push_str("\x1b[2J\x1b[H");
 
-    // ══════════════════════════════════════════════════════════════
-    // LOGO - Classic ASCII art in a box
-    // ══════════════════════════════════════════════════════════════
+    // ══════════════════════════════════════════════════════════════════════════════
+    // CENTERED LOGO
+    // ══════════════════════════════════════════════════════════════════════════════
     out.push_str(&format!("{BRIGHT_RED}{BOLD}"));
-    out.push_str(" ╔════════════════════════════════════════╗\n");
-    out.push_str(" ║  ____           _____ __  __ ____      ║\n");
-    out.push_str(" ║ |  _ \\ _   _ __|_   _|  \\/  |  _ \\     ║\n");
-    out.push_str(" ║ | |_) | | | / __|| | | |\\/| | |_) |    ║\n");
-    out.push_str(" ║ |  _ <| |_| \\__ \\| | | |  | |  __/     ║\n");
-    out.push_str(" ║ |_| \\_\\\\__,_|___/|_| |_|  |_|_|        ║\n");
-    out.push_str(" ╚════════════════════════════════════════╝\n");
+    out.push_str(&center("╔════════════════════════════════════════╗", WIDTH));
+    out.push('\n');
+    out.push_str(&center("║  ____           _____ __  __ ____      ║", WIDTH));
+    out.push('\n');
+    out.push_str(&center("║ |  _ \\ _   _ __|_   _|  \\/  |  _ \\     ║", WIDTH));
+    out.push('\n');
+    out.push_str(&center("║ | |_) | | | / __|| | | |\\/| | |_) |    ║", WIDTH));
+    out.push('\n');
+    out.push_str(&center("║ |  _ <| |_| \\__ \\| | | |  | |  __/     ║", WIDTH));
+    out.push('\n');
+    out.push_str(&center("║ |_| \\_\\\\__,_|___/|_| |_|  |_|_|        ║", WIDTH));
+    out.push('\n');
+    out.push_str(&center("╚════════════════════════════════════════╝", WIDTH));
+    out.push('\n');
     out.push_str(&format!("{RESET}"));
-    out.push_str(&format!(" {DIM}Stream Analyzer v0.1.0{RESET}\n\n"));
+    out.push_str(&center(&format!("{DIM}Stream Analyzer v0.1.0{RESET}"), WIDTH));
+    out.push_str("\n\n");
 
-    // ══════════════════════════════════════════════════════════════
-    // STREAM INFO BOX
-    // ══════════════════════════════════════════════════════════════
+    // ══════════════════════════════════════════════════════════════════════════════
+    // STREAM INFO (centered, wide box)
+    // ══════════════════════════════════════════════════════════════════════════════
     let stream_path = format!("{}/{}",
         if app_name.is_empty() { "?" } else { app_name },
         if stream_key.is_empty() { "?" } else { stream_key });
     let encoder_str = encoder_name.as_deref().unwrap_or("-");
     let duration_str = format_duration(stats.duration_secs);
 
-    out.push_str(&format!(" {DIM}┌─────────────────────────────────────┐{RESET}\n"));
-    out.push_str(&format!(" {DIM}│{RESET} {CYAN}Stream:{RESET}   {BRIGHT_GREEN}{:<25}{RESET} {DIM}│{RESET}\n", stream_path));
-    out.push_str(&format!(" {DIM}│{RESET} {CYAN}Encoder:{RESET}  {:<25} {DIM}│{RESET}\n", encoder_str));
-    out.push_str(&format!(" {DIM}│{RESET} {CYAN}Duration:{RESET} {BRIGHT_YELLOW}{:<25}{RESET} {DIM}│{RESET}\n", duration_str));
-    out.push_str(&format!(" {DIM}└─────────────────────────────────────┘{RESET}\n\n"));
+    // Status
+    let errors = diagnostics.error_count();
+    let warnings = diagnostics.warning_count();
+    let status_str = if errors > 0 {
+        format!("{BRIGHT_RED}{} error{}{RESET}", errors, if errors > 1 { "s" } else { "" })
+    } else if warnings > 0 {
+        format!("{BRIGHT_YELLOW}{} warning{}{RESET}", warnings, if warnings > 1 { "s" } else { "" })
+    } else {
+        format!("{BRIGHT_GREEN}healthy{RESET}")
+    };
 
-    // ══════════════════════════════════════════════════════════════
-    // VIDEO SECTION
-    // ══════════════════════════════════════════════════════════════
-    out.push_str(&format!(" {MAGENTA}{BOLD}▶ VIDEO{RESET}\n"));
-    out.push_str(&format!(" {DIM}─────────────────────────────────────{RESET}\n"));
+    out.push_str(&center(&format!("{DIM}┌────────────────────────────────────────────────────────────────────────────────┐{RESET}"), WIDTH));
+    out.push('\n');
+    out.push_str(&center(&format!("{DIM}│{RESET}  {CYAN}Stream:{RESET} {BRIGHT_GREEN}{:<20}{RESET}  {CYAN}Encoder:{RESET} {:<20}  {CYAN}Duration:{RESET} {BRIGHT_YELLOW}{:<8}{RESET}  {DIM}│{RESET}",
+        stream_path, encoder_str, duration_str), WIDTH));
+    out.push('\n');
+    out.push_str(&center(&format!("{DIM}│{RESET}  {CYAN}Profile:{RESET} {BRIGHT_CYAN}{:<18}{RESET}  {CYAN}Status:{RESET} {:<42} {DIM}│{RESET}",
+        diagnostics.profile.name(), status_str), WIDTH));
+    out.push('\n');
+    out.push_str(&center(&format!("{DIM}└────────────────────────────────────────────────────────────────────────────────┘{RESET}"), WIDTH));
+    out.push_str("\n\n");
+
+    // ══════════════════════════════════════════════════════════════════════════════
+    // VIDEO & AUDIO SIDE BY SIDE
+    // ══════════════════════════════════════════════════════════════════════════════
+
+    // Prepare video lines
+    let mut video_lines: Vec<String> = Vec::new();
+    video_lines.push(format!("{MAGENTA}{BOLD}▶ VIDEO{RESET}"));
+    video_lines.push(format!("{DIM}──────────────────────────────────────{RESET}"));
 
     let codec = video.codec.as_ref().map(|c| c.to_string()).unwrap_or_else(|| "-".into());
-    out.push_str(&format!("   {DIM}Codec:{RESET}       {BRIGHT_GREEN}{}{RESET}\n", codec));
+    video_lines.push(format!("  {DIM}Codec:{RESET}      {BRIGHT_GREEN}{}{RESET}", codec));
 
     if let (Some(w), Some(h)) = (video.width, video.height) {
-        out.push_str(&format!("   {DIM}Resolution:{RESET}  {BRIGHT_YELLOW}{}x{}{RESET}\n", w, h));
+        video_lines.push(format!("  {DIM}Resolution:{RESET} {BRIGHT_YELLOW}{}x{}{RESET}", w, h));
+    } else {
+        video_lines.push(format!("  {DIM}Resolution:{RESET} -"));
     }
 
     if let Some(ref p) = video.profile {
         let level_str = video.level.as_deref().unwrap_or("?");
-        out.push_str(&format!("   {DIM}Profile:{RESET}     {} @ Level {}\n", p, level_str));
+        video_lines.push(format!("  {DIM}Profile:{RESET}    {} @ L{}", p, level_str));
+    } else {
+        video_lines.push(format!("  {DIM}Profile:{RESET}    -"));
     }
 
     let fps = stats.current_fps().unwrap_or(0.0);
     let fps_color = if fps >= 29.0 { BRIGHT_GREEN } else if fps >= 24.0 { YELLOW } else { BRIGHT_RED };
-    out.push_str(&format!("   {DIM}FPS:{RESET}         {}{:.1}{RESET}\n", fps_color, fps));
+    video_lines.push(format!("  {DIM}FPS:{RESET}        {}{:.1}{RESET}", fps_color, fps));
 
-    out.push_str(&format!("   {DIM}Bitrate:{RESET}     {BRIGHT_CYAN}{}{RESET}\n",
+    video_lines.push(format!("  {DIM}Bitrate:{RESET}    {BRIGHT_CYAN}{}{RESET}",
         format_bitrate(stats.current_video_bitrate_kbps().unwrap_or(0.0))));
 
     let kf_int = stats.keyframe_interval_secs.map(|s| format!("{:.1}s", s)).unwrap_or_else(|| "-".into());
-    out.push_str(&format!("   {DIM}Keyframes:{RESET}   {} {DIM}(interval: {}){RESET}\n", video.keyframe_count, kf_int));
-    out.push_str(&format!("   {DIM}P-frames:{RESET}    {}\n", video.inter_frame_count));
-    out.push_str(&format!("   {DIM}B-frames:{RESET}    {}\n", video.b_frame_count));
+    video_lines.push(format!("  {DIM}Keyframes:{RESET}  {} {DIM}(int: {}){RESET}", video.keyframe_count, kf_int));
+    video_lines.push(format!("  {DIM}P-frames:{RESET}   {}", video.inter_frame_count));
+    video_lines.push(format!("  {DIM}B-frames:{RESET}   {}", video.b_frame_count));
 
     let total_video_frames = video.keyframe_count + video.inter_frame_count + video.b_frame_count;
     let video_kb = stats.total_video_bytes as f64 / 1024.0;
-    out.push_str(&format!(" {DIM}Total: {} frames, {:.1} KB{RESET}\n\n", total_video_frames, video_kb));
+    video_lines.push(format!("{DIM}Total: {} frames, {:.1} KB{RESET}", total_video_frames, video_kb));
 
-    // ══════════════════════════════════════════════════════════════
-    // AUDIO SECTION
-    // ══════════════════════════════════════════════════════════════
-    out.push_str(&format!(" {BLUE}{BOLD}♪ AUDIO{RESET}\n"));
-    out.push_str(&format!(" {DIM}─────────────────────────────────────{RESET}\n"));
+    // Prepare audio lines
+    let mut audio_lines: Vec<String> = Vec::new();
+    audio_lines.push(format!("{BLUE}{BOLD}♪ AUDIO{RESET}"));
+    audio_lines.push(format!("{DIM}──────────────────────────────────────{RESET}"));
 
     let acodec = audio.codec.as_ref().map(|c| c.to_string()).unwrap_or_else(|| "-".into());
-    out.push_str(&format!("   {DIM}Codec:{RESET}       {BRIGHT_GREEN}{}{RESET}\n", acodec));
+    audio_lines.push(format!("  {DIM}Codec:{RESET}      {BRIGHT_GREEN}{}{RESET}", acodec));
 
     if let Some(ref p) = audio.aac_profile {
-        out.push_str(&format!("   {DIM}Profile:{RESET}     {}\n", p));
+        audio_lines.push(format!("  {DIM}Profile:{RESET}    {}", p));
+    } else {
+        audio_lines.push(format!("  {DIM}Profile:{RESET}    -"));
     }
 
     let sr = audio.effective_sample_rate().map(|r| format!("{} Hz", r)).unwrap_or_else(|| "-".into());
-    out.push_str(&format!("   {DIM}Sample Rate:{RESET} {BRIGHT_YELLOW}{}{RESET}\n", sr));
+    audio_lines.push(format!("  {DIM}Sample Rate:{RESET} {BRIGHT_YELLOW}{}{RESET}", sr));
 
     let ch = audio.effective_channels().unwrap_or(0);
     let ch_str = match ch { 1 => "mono", 2 => "stereo", 6 => "5.1", 8 => "7.1", _ => "-" };
-    out.push_str(&format!("   {DIM}Channels:{RESET}    {} ({})\n", ch, ch_str));
+    audio_lines.push(format!("  {DIM}Channels:{RESET}   {} ({})", ch, ch_str));
 
-    // Bit depth from FLV header
     let bit_depth = audio.sample_size.map(|s| format!("{}-bit", s)).unwrap_or_else(|| "-".into());
-    out.push_str(&format!("   {DIM}Bit Depth:{RESET}   {}\n", bit_depth));
+    audio_lines.push(format!("  {DIM}Bit Depth:{RESET}  {}", bit_depth));
 
-    out.push_str(&format!("   {DIM}Bitrate:{RESET}     {BRIGHT_CYAN}{}{RESET}\n",
+    audio_lines.push(format!("  {DIM}Bitrate:{RESET}    {BRIGHT_CYAN}{}{RESET}",
         format_bitrate(stats.current_audio_bitrate_kbps().unwrap_or(0.0))));
 
-    let audio_kb = stats.total_audio_bytes as f64 / 1024.0;
-    out.push_str(&format!(" {DIM}Total: {} frames, {:.1} KB{RESET}\n\n", audio.total_audio_frames, audio_kb));
-
-    // ══════════════════════════════════════════════════════════════
-    // DIAGNOSTICS SECTION
-    // ══════════════════════════════════════════════════════════════
-    let errors = diagnostics.error_count();
-    let warnings = diagnostics.warning_count();
-
-    if errors > 0 {
-        out.push_str(&format!(" {BRIGHT_RED}{BOLD}✖ ERRORS{RESET}\n"));
-    } else if warnings > 0 {
-        out.push_str(&format!(" {BRIGHT_YELLOW}{BOLD}⚠ WARNINGS{RESET}\n"));
-    } else {
-        out.push_str(&format!(" {BRIGHT_GREEN}{BOLD}✓ STATUS: OK{RESET}\n"));
+    // Pad audio to match video line count
+    while audio_lines.len() < video_lines.len() - 1 {
+        audio_lines.push(String::new());
     }
-    out.push_str(&format!(" {DIM}─────────────────────────────────────{RESET}\n"));
+
+    let audio_kb = stats.total_audio_bytes as f64 / 1024.0;
+    audio_lines.push(format!("{DIM}Total: {} frames, {:.1} KB{RESET}", audio.total_audio_frames, audio_kb));
+
+    // Render side by side
+    let max_lines = video_lines.len().max(audio_lines.len());
+    for i in 0..max_lines {
+        let v_line = video_lines.get(i).map(|s| s.as_str()).unwrap_or("");
+        let a_line = audio_lines.get(i).map(|s| s.as_str()).unwrap_or("");
+        out.push_str("  ");
+        out.push_str(&pad_to(v_line, COL_WIDTH));
+        out.push_str("  │  ");
+        out.push_str(a_line);
+        out.push('\n');
+    }
+    out.push('\n');
+
+    // ══════════════════════════════════════════════════════════════════════════════
+    // DIAGNOSTICS SECTION
+    // ══════════════════════════════════════════════════════════════════════════════
+    if errors > 0 {
+        out.push_str(&format!("  {BRIGHT_RED}{BOLD}✖ ERRORS{RESET}\n"));
+    } else if warnings > 0 {
+        out.push_str(&format!("  {BRIGHT_YELLOW}{BOLD}⚠ WARNINGS{RESET}\n"));
+    } else {
+        out.push_str(&format!("  {BRIGHT_GREEN}{BOLD}✓ STATUS: OK{RESET}\n"));
+    }
+    out.push_str(&format!("  {DIM}────────────────────────────────────────────────────────────────────────────────────{RESET}\n"));
 
     if diagnostic_results.is_empty() {
-        out.push_str(&format!("   {DIM}No issues detected{RESET}\n"));
+        out.push_str(&format!("    {DIM}No issues detected{RESET}\n"));
     } else {
-        for diag in diagnostic_results.iter().take(6) {
+        for diag in diagnostic_results.iter().take(4) {
             let (icon, color) = match diag.severity {
                 Severity::Error => ("✖", BRIGHT_RED),
                 Severity::Warning => ("!", BRIGHT_YELLOW),
                 Severity::Info => ("·", DIM),
             };
-            out.push_str(&format!("   {color}{icon}{RESET} [{DIM}{}{RESET}] {}\n", diag.category, diag.message));
+            out.push_str(&format!("    {color}{icon}{RESET} [{DIM}{}{RESET}] {}\n", diag.category, diag.message));
         }
-        if diagnostic_results.len() > 6 {
-            out.push_str(&format!("   {DIM}+{} more...{RESET}\n", diagnostic_results.len() - 6));
+        if diagnostic_results.len() > 4 {
+            out.push_str(&format!("    {DIM}+{} more...{RESET}\n", diagnostic_results.len() - 4));
         }
     }
 
-    // ══════════════════════════════════════════════════════════════
-    // FOOTER - Headers status and help
-    // ══════════════════════════════════════════════════════════════
+    // ══════════════════════════════════════════════════════════════════════════════
+    // FOOTER
+    // ══════════════════════════════════════════════════════════════════════════════
     out.push('\n');
-    out.push_str(&format!(" {DIM}Headers:{RESET} "));
+    out.push_str(&format!("  {DIM}Headers:{RESET} "));
     let avc_status = if diagnostics.avc_seq_header_received {
         format!("{GREEN}AVC{RESET}")
     } else {
@@ -223,7 +310,7 @@ pub fn render(
     out.push_str(" ");
     out.push_str(&meta_status);
 
-    out.push_str(&format!("\n\n {DIM}Press Ctrl+C to stop{RESET}\n"));
+    out.push_str(&format!("\n\n  {DIM}Press Ctrl+C to stop{RESET}\n"));
 
     print!("{}", out);
     let _ = io::stdout().flush();
