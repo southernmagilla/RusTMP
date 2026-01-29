@@ -4,7 +4,9 @@
       "Bash(cargo init:*)",
       "Bash(cargo build:*)",
       "WebFetch(domain:raw.githubusercontent.com)",
-      "Bash(cargo search:*)"
+      "Bash(cargo search:*)",
+      "Bash(cargo clean:*)",
+      "Bash(handle \"d:\\\\RusTMP\\\\target\\\\debug\\\\rustmp.exe\")"
     ]
   }
 }

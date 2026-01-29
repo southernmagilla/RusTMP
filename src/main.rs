@@ -2,6 +2,7 @@ use clap::Parser;
 use tokio::net::TcpListener;
 
 mod connection;
+mod diagnostics;
 mod display;
 mod flv;
 mod rtmp;
